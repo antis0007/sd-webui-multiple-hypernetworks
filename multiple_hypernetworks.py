@@ -99,28 +99,21 @@ class Script(scripts.Script):
 
     def run(self, p, hypernetworks, hypernetworks_strength): #p = processing object
         #process hypernetworks:
-
         #shared.opts.hypernetwork_obj_list = []
 
         reload_hypernetworks_list()
-        print(hypernetworks)
-        #split hypernetworks string into list, comma seperated and strip whitespace
-        print(hypernetworks_list)
-
-        #Snippets:
-        #stripped = text.split(sep, 1)[0]
-        #.split('(', 1)[0]
+        #DEBUG:
+        #print(hypernetworks)
+        #print(hypernetworks_list)
 
         hypernetworks = [x.strip() for x in hypernetworks.split(',')]
-        print(hypernetworks)
-
         hypernetworks_strength = hypernetworks_strength.split(",")
         hypernetworks_strength = [float(element) for element in hypernetworks_strength]
-        print(hypernetworks_strength)
+        #print(hypernetworks_strength)
         hypernetworks = list(zip(hypernetworks, hypernetworks_strength))
-        print()
-        print("FINAL:")
-        print(hypernetworks)
+        #print()
+        #print("FINAL:")
+        #print(hypernetworks)
 
         global old_hypernetworks #bad practice lol, may not be necessary
         #shared.opts.hypernetwork_obj_list index corresponds to index in old_hypernetworks
@@ -137,15 +130,15 @@ class Script(scripts.Script):
             skip.append((new, shared.opts.hypernetwork_obj_list[old]))
             
         if len(skip) > 0:
-            print("Skipping:")
-            print(skip)
+            #print("Skipping:")
+            #print(skip)
             skip_x, skip_y = zip(*skip)
-            print(skip_x) #indices to skip
-            print(skip_y) #hypernetwork objects
+            #print(skip_x) #indices to skip
+            #print(skip_y) #hypernetwork objects
         else:
             print("Found nothing to skip...")
 
-        print("Clearing old hypernetwork objects...")
+        #print("Clearing old hypernetwork objects...")
         shared.opts.hypernetwork_obj_list = []
 
         #shared.opts.hypernetwork_obj_list
@@ -159,8 +152,9 @@ class Script(scripts.Script):
         #Undo hijack:
         sd_hijack.model_hijack.undo_hijack(model)
 
-        checkpoint_info = sd_models.select_checkpoint()
-        sd_models.load_model_weights(model, checkpoint_info)
+        #Bugfix: no longer reload model weights on every generation
+        #checkpoint_info = sd_models.select_checkpoint()
+        #sd_models.load_model_weights(model, checkpoint_info)
 
         #Now we hijack again (CUSTOM HIJACK)
         #This part of the code runs a custom hijack very similar to StableDiffusionModelHijack.hijack(self, m) in sd_hijack.py
@@ -190,15 +184,17 @@ class Script(scripts.Script):
             shared.opts.hypernetwork_obj_list.append(hypernetwork_obj)
             counter+=1
 
-        print("Hypernetwork obj list:")
-        print(shared.opts.hypernetwork_obj_list)
+        #DEBUG:
+        #print("Hypernetwork obj list:")
+        #print(shared.opts.hypernetwork_obj_list)
 
         #hypernetwork_obj_list now contains all hypernetwork objects we plan to use
         
         #Here we override the CrossAttention forward method with our custom one:
         ldm.modules.attention.CrossAttention.forward = attention_CrossAttention_forward_custom
-        #ldm.modules.diffusionmodules.model.AttnBlock.forward = sd_hijack_optimizations.xformers_attnblock_forward
 
+        #NOTE:
+        #ldm.modules.diffusionmodules.model.AttnBlock.forward = sd_hijack_optimizations.xformers_attnblock_forward
         #We don't actually need to modify the AttnBlock method it seems, TODO Investigate this further
         #No hypernetworks get loaded, may need to write a custom function to optimize?
 
