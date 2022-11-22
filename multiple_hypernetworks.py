@@ -2,7 +2,7 @@ import modules.scripts as scripts
 import gradio as gr
 import os
 
-from modules import devices, sd_hijack, sd_models, shared
+from modules import devices, sd_hijack, sd_hijack_optimizations, sd_models, shared
 from modules.shared import opts, cmd_opts, state, config_filename
 from modules.hypernetworks import hypernetwork
 
@@ -14,6 +14,18 @@ import torch
 from torch import einsum
 from torch.nn.functional import silu
 from einops import repeat, rearrange
+
+import math
+import sys
+import traceback
+
+if shared.cmd_opts.xformers or shared.cmd_opts.force_enable_xformers:
+    try:
+        import xformers.ops
+        shared.xformers_available = True
+    except Exception:
+        print("Cannot import xformers", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
 
 old_hypernetworks = [] #keeps track of the last loaded hypernetwork parameters so we don't reload if we don't need to
 shared.opts.hypernetwork_obj_list = []
@@ -45,33 +57,166 @@ def apply_multi_hypernetworks(hypernetwork_obj_list, context): #NO LAYER OPTION
         context_v = hypernetwork_layers[1](context_v)
     return context_k, context_v
 
-#TODO: Create multiple versions of this function with various optimizations (Xformers, etc...)
-def attention_CrossAttention_forward_custom(obj, x, context=None, mask=None):
+def apply_optimizations_custom():
+    ldm.modules.diffusionmodules.model.nonlinearity = silu
+    if cmd_opts.force_enable_xformers or (cmd_opts.xformers and shared.xformers_available and torch.version.cuda and (6, 0) <= torch.cuda.get_device_capability(shared.device) <= (9, 0)):
+        print("Applying xformers cross attention optimization.")
+        ldm.modules.attention.CrossAttention.forward = xformers_attention_forward_custom
+    elif cmd_opts.opt_split_attention_v1:
+        print("Applying v1 cross attention optimization.")
+        ldm.modules.attention.CrossAttention.forward = split_cross_attention_forward_v1_custom
+    elif not cmd_opts.disable_opt_split_attention and (cmd_opts.opt_split_attention_invokeai or not torch.cuda.is_available()):
+        if not sd_hijack_optimizations.invokeAI_mps_available and shared.device.type == 'mps':
+            print("The InvokeAI cross attention optimization for MPS requires the psutil package which is not installed.")
+            print("Applying v1 cross attention optimization.")
+            ldm.modules.attention.CrossAttention.forward = split_cross_attention_forward_v1_custom
+        else:
+            print("Applying cross attention optimization (InvokeAI).")
+            ldm.modules.attention.CrossAttention.forward = split_cross_attention_forward_invokeAI_custom
+    elif not cmd_opts.disable_opt_split_attention and (cmd_opts.opt_split_attention or torch.cuda.is_available()):
+        print("Applying cross attention optimization (Doggettx).")
+        ldm.modules.attention.CrossAttention.forward = split_cross_attention_forward_custom
+
+#hijack_optimizations CUSTOM:
+
+def xformers_attention_forward_custom(obj, x, context=None, mask=None):
     h = obj.heads
-    q = obj.to_q(x)
+    q_in = obj.to_q(x)
     context = default(context, x)
+
     #New custom shared attribute for storing our loaded hypernetworks across all files:
     hypernetwork_obj_list = shared.opts.hypernetwork_obj_list
     
     context_k, context_v = apply_multi_hypernetworks(hypernetwork_obj_list, context)
 
-    k = obj.to_k(context_k)
-    v = obj.to_v(context_v)
-    q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q, k, v))
+    k_in = obj.to_k(context_k)
+    v_in = obj.to_v(context_v)
 
-    sim = einsum('b i d, b j d -> b i j', q, k) * obj.scale
+    q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b n h d', h=h), (q_in, k_in, v_in))
+    del q_in, k_in, v_in
+    out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None)
 
-    if mask is not None:
-        mask = rearrange(mask, 'b ... -> b (...)')
-        max_neg_value = -torch.finfo(sim.dtype).max
-        mask = repeat(mask, 'b j -> (b h) () j', h=h)
-        sim.masked_fill_(~mask, max_neg_value)
-
-    attn = sim.softmax(dim=-1)
-
-    out = einsum('b i j, b j d -> b i d', attn, v)
-    out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
+    out = rearrange(out, 'b n h d -> b n (h d)', h=h)
     return obj.to_out(out)
+
+def split_cross_attention_forward_v1_custom(obj, x, context=None, mask=None):
+    h = obj.heads
+
+    q_in = obj.to_q(x)
+    context = default(context, x)
+
+    #New custom shared attribute for storing our loaded hypernetworks across all files:
+    hypernetwork_obj_list = shared.opts.hypernetwork_obj_list
+    
+    context_k, context_v = apply_multi_hypernetworks(hypernetwork_obj_list, context)
+
+    k_in = obj.to_k(context_k)
+    v_in = obj.to_v(context_v)
+    del context, context_k, context_v, x
+
+    q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q_in, k_in, v_in))
+    del q_in, k_in, v_in
+
+    r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=q.device)
+    for i in range(0, q.shape[0], 2):
+        end = i + 2
+        s1 = einsum('b i d, b j d -> b i j', q[i:end], k[i:end])
+        s1 *= obj.scale
+
+        s2 = s1.softmax(dim=-1)
+        del s1
+
+        r1[i:end] = einsum('b i j, b j d -> b i d', s2, v[i:end])
+        del s2
+    del q, k, v
+
+    r2 = rearrange(r1, '(b h) n d -> b n (h d)', h=h)
+    del r1
+
+    return obj.to_out(r2)
+
+def split_cross_attention_forward_invokeAI_custom(obj, x, context=None, mask=None):
+    h = obj.heads
+
+    q = obj.to_q(x)
+    context = default(context, x)
+
+    #New custom shared attribute for storing our loaded hypernetworks across all files:
+    hypernetwork_obj_list = shared.opts.hypernetwork_obj_list
+    
+    context_k, context_v = apply_multi_hypernetworks(hypernetwork_obj_list, context)
+
+    k = obj.to_k(context_k) * obj.scale
+    v = obj.to_v(context_v)
+    del context, context_k, context_v, x
+
+    q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q, k, v))
+    r = sd_hijack_optimizations.einsum_op(q, k, v)
+    return obj.to_out(rearrange(r, '(b h) n d -> b n (h d)', h=h))
+
+def split_cross_attention_forward_custom(obj, x, context=None, mask=None):
+    h = obj.heads
+
+    q_in = obj.to_q(x)
+    context = default(context, x)
+
+    #New custom shared attribute for storing our loaded hypernetworks across all files:
+    hypernetwork_obj_list = shared.opts.hypernetwork_obj_list
+    
+    context_k, context_v = apply_multi_hypernetworks(hypernetwork_obj_list, context)
+
+    k_in = obj.to_k(context_k)
+    v_in = obj.to_v(context_v)
+
+    k_in *= obj.scale
+
+    del context, x
+
+    q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q_in, k_in, v_in))
+    del q_in, k_in, v_in
+
+    r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=q.device, dtype=q.dtype)
+
+    stats = torch.cuda.memory_stats(q.device)
+    mem_active = stats['active_bytes.all.current']
+    mem_reserved = stats['reserved_bytes.all.current']
+    mem_free_cuda, _ = torch.cuda.mem_get_info(torch.cuda.current_device())
+    mem_free_torch = mem_reserved - mem_active
+    mem_free_total = mem_free_cuda + mem_free_torch
+
+    gb = 1024 ** 3
+    tensor_size = q.shape[0] * q.shape[1] * k.shape[1] * q.element_size()
+    modifier = 3 if q.element_size() == 2 else 2.5
+    mem_required = tensor_size * modifier
+    steps = 1
+
+    if mem_required > mem_free_total:
+        steps = 2 ** (math.ceil(math.log(mem_required / mem_free_total, 2)))
+        # print(f"Expected tensor size:{tensor_size/gb:0.1f}GB, cuda free:{mem_free_cuda/gb:0.1f}GB "
+        #       f"torch free:{mem_free_torch/gb:0.1f} total:{mem_free_total/gb:0.1f} steps:{steps}")
+
+    if steps > 64:
+        max_res = math.floor(math.sqrt(math.sqrt(mem_free_total / 2.5)) / 8) * 64
+        raise RuntimeError(f'Not enough memory, use lower resolution (max approx. {max_res}x{max_res}). '
+                           f'Need: {mem_required / 64 / gb:0.1f}GB free, Have:{mem_free_total / gb:0.1f}GB free')
+
+    slice_size = q.shape[1] // steps if (q.shape[1] % steps) == 0 else q.shape[1]
+    for i in range(0, q.shape[1], slice_size):
+        end = i + slice_size
+        s1 = einsum('b i d, b j d -> b i j', q[:, i:end], k)
+
+        s2 = s1.softmax(dim=-1, dtype=q.dtype)
+        del s1
+
+        r1[:, i:end] = einsum('b i j, b j d -> b i d', s2, v)
+        del s2
+
+    del q, k, v
+
+    r2 = rearrange(r1, '(b h) n d -> b n (h d)', h=h)
+    del r1
+
+    return obj.to_out(r2)
 
 def reset_script():
     global proc
@@ -179,7 +324,7 @@ class Script(scripts.Script):
         model.cond_stage_model = sd_hijack.FrozenCLIPEmbedderWithCustomWords(model.cond_stage_model, sd_hijack.model_hijack)
         sd_hijack.model_hijack.clip = model.cond_stage_model
         sd_hijack.undo_optimizations()
-        ldm.modules.diffusionmodules.model.nonlinearity = silu
+
         counter = 0
         for hypernetwork_data in hypernetworks:
             if counter in skip_x: #Skips loading hypernetworks that are already loaded
@@ -205,8 +350,7 @@ class Script(scripts.Script):
 
         #hypernetwork_obj_list now contains all hypernetwork objects we plan to use
         
-        #Here we override the CrossAttention forward method with our custom one:
-        ldm.modules.attention.CrossAttention.forward = attention_CrossAttention_forward_custom
+        apply_optimizations_custom()
 
         #NOTE:
         #ldm.modules.diffusionmodules.model.AttnBlock.forward = sd_hijack_optimizations.xformers_attnblock_forward
