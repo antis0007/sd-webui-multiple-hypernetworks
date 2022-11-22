@@ -1,6 +1,15 @@
 # Multiple Hypernetworks
 Script that allows the use of multiple hypernetworks at once in AUTOMATIC1111's Stable Diffusion webui
 
+### UPDATES:
+- Now supports multiple optimization methods + higher resolutions!
+- Fixed reloading weights for no reason
+- Added "reset" button:
+  - **Press this once you finish using this script, otherwise hypernetworks will remain loaded**
+
+Please report any bugs you encounter with this version!
+
+
 ## What is this?
 
 This is a script I wrote to hack in the ability to apply multiple Hypernetworks at once in [AUTOMATIC1111's stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
