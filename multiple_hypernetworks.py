@@ -17,6 +17,7 @@ from einops import repeat, rearrange
 
 old_hypernetworks = [] #keeps track of the last loaded hypernetwork parameters so we don't reload if we don't need to
 shared.opts.hypernetwork_obj_list = []
+proc = None
 
 #Custom hypernetwork loading:
 def load_hypernetwork_custom(filename):
@@ -71,7 +72,15 @@ def attention_CrossAttention_forward_custom(obj, x, context=None, mask=None):
     out = einsum('b i j, b j d -> b i d', attn, v)
     out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
     return obj.to_out(out)
-    
+
+def reset_script():
+    global proc
+    if proc != None:
+        checkpoint_info = sd_models.select_checkpoint()
+        proc.sd_model = sd_models.load_model(checkpoint_info)
+        shared.opts.hypernetwork_obj_list = []
+    print("RESET!")
+
 class Script(scripts.Script):  
     def title(self):
         #return "Hypernetworks EX V3"
@@ -89,17 +98,23 @@ class Script(scripts.Script):
         return (not is_img2img)
 
     def ui(self, is_img2img):
-        with gr.Accordion("Hypernetworks List", open=False):
-            #gr.Markdown(value = "### Hypernetworks:")
-            #gr.Markdown(value = "----")
-            gr.Markdown(value = "  <br>  ".join(hypernetworks_list.keys()))
+        global proc #global processing object, terrible solution
+        with gr.Row():
+            with gr.Accordion("Hypernetworks List", open=False):
+                #gr.Markdown(value = "### Hypernetworks:")
+                #gr.Markdown(value = "----")
+                gr.Markdown(value = "  <br>  ".join(hypernetworks_list.keys()))
         hypernetworks = gr.Textbox(label="Hypernetworks",lines=1)
         hypernetworks_strength = gr.Textbox(label="Hypernetwork strengths",lines=1)
+        btn = gr.Button(value="Reset")
+        btn.click(reset_script)
         return [hypernetworks, hypernetworks_strength]
 
     def run(self, p, hypernetworks, hypernetworks_strength): #p = processing object
         #process hypernetworks:
         #shared.opts.hypernetwork_obj_list = []
+        global proc
+        proc = p
 
         reload_hypernetworks_list()
         #DEBUG:
