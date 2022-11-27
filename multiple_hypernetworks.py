@@ -3,6 +3,8 @@ import gradio as gr
 import os
 
 from modules import devices, sd_hijack, sd_hijack_optimizations, sd_models, shared
+from modules import sd_hijack_clip, sd_hijack_open_clip #NEW
+
 from modules.shared import opts, cmd_opts, state, config_filename
 from modules.hypernetworks import hypernetwork
 
@@ -226,7 +228,10 @@ def reset_script():
         shared.opts.hypernetwork_obj_list = []
     print("RESET!")
 
-class Script(scripts.Script):  
+def on_ui_settings():
+	section = ('multiple-hypernetworks', "Multiple Hypernetworks")
+
+class MultipleHypernetworks(scripts.Script):  
     def title(self):
         #return "Hypernetworks EX V3"
         return "Multiple Hypernetworks"
@@ -256,8 +261,6 @@ class Script(scripts.Script):
         return [hypernetworks, hypernetworks_strength]
 
     def run(self, p, hypernetworks, hypernetworks_strength): #p = processing object
-        #process hypernetworks:
-        #shared.opts.hypernetwork_obj_list = []
         global proc
         proc = p
 
@@ -270,41 +273,24 @@ class Script(scripts.Script):
         hypernetworks_strength = hypernetworks_strength.split(",")
         hypernetworks_strength = [float(element) for element in hypernetworks_strength]
         #print(hypernetworks_strength)
-        hypernetworks = list(zip(hypernetworks, hypernetworks_strength))
-        #print()
+        hypernetworks = list(zip(hypernetworks, hypernetworks_strength)) #contains hypernet strings and strengths
+
         #print("FINAL:")
         #print(hypernetworks)
 
         global old_hypernetworks #bad practice lol, may not be necessary
         #shared.opts.hypernetwork_obj_list index corresponds to index in old_hypernetworks
         skip = []
-        skip_x = []
-        skip_y = []
 
-        skip_ind = []
-        for old in range(len(old_hypernetworks)):
-            for new in range(len(hypernetworks)):
-                if hypernetworks[new] == old_hypernetworks[old]:
-                    skip_ind.append((old,new))
-        for new,old in skip_ind:
-            skip.append((new, shared.opts.hypernetwork_obj_list[old]))
-            
-        if len(skip) > 0:
-            #print("Skipping:")
-            #print(skip)
-            skip_x, skip_y = zip(*skip)
-            #print(skip_x) #indices to skip
-            #print(skip_y) #hypernetwork objects
-        else:
-            print("Found nothing to skip...")
+        for old_ind in range(len(old_hypernetworks)):
+            for new_ind in range(len(hypernetworks)):
+                if hypernetworks[new_ind][0] == old_hypernetworks[old_ind][0]: #if names identical
+                    skip.append((new_ind, shared.opts.hypernetwork_obj_list[old_ind])) #[0] = new hypernet index, [1] = old hypernet object
 
         #print("Clearing old hypernetwork objects...")
         shared.opts.hypernetwork_obj_list = []
 
         #shared.opts.hypernetwork_obj_list
-                    
-
-        #I HAVE NO IDEA WHAT I'M DOING
 
         #Alias our model:
         model = p.sd_model
@@ -312,28 +298,36 @@ class Script(scripts.Script):
         #Undo hijack:
         sd_hijack.model_hijack.undo_hijack(model)
 
-        #Bugfix: no longer reload model weights on every generation
-        #checkpoint_info = sd_models.select_checkpoint()
-        #sd_models.load_model_weights(model, checkpoint_info)
-
         #Now we hijack again (CUSTOM HIJACK)
         #This part of the code runs a custom hijack very similar to StableDiffusionModelHijack.hijack(self, m) in sd_hijack.py
         
-        model_embeddings = model.cond_stage_model.transformer.text_model.embeddings
-        model_embeddings.token_embedding = sd_hijack.EmbeddingsWithFixes(model_embeddings.token_embedding, sd_hijack.model_hijack)
-        model.cond_stage_model = sd_hijack.FrozenCLIPEmbedderWithCustomWords(model.cond_stage_model, sd_hijack.model_hijack)
+        if type(model.cond_stage_model) == ldm.modules.encoders.modules.FrozenCLIPEmbedder:
+            model_embeddings = model.cond_stage_model.transformer.text_model.embeddings
+            model_embeddings.token_embedding = sd_hijack.EmbeddingsWithFixes(model_embeddings.token_embedding, sd_hijack.model_hijack)
+            model.cond_stage_model = sd_hijack_clip.FrozenCLIPEmbedderWithCustomWords(model.cond_stage_model, sd_hijack.model_hijack)
+
+        elif type(model.cond_stage_model) == ldm.modules.encoders.modules.FrozenOpenCLIPEmbedder:
+            model.cond_stage_model.model.token_embedding = sd_hijack.EmbeddingsWithFixes(model.cond_stage_model.model.token_embedding, sd_hijack.model_hijack)
+            model.cond_stage_model = sd_hijack_open_clip.FrozenOpenCLIPEmbedderWithCustomWords(model.cond_stage_model, sd_hijack.model_hijack)
         sd_hijack.model_hijack.clip = model.cond_stage_model
+        
+        #Apply optimizations
         sd_hijack.undo_optimizations()
 
-        counter = 0
-        for hypernetwork_data in hypernetworks:
-            if counter in skip_x: #Skips loading hypernetworks that are already loaded
-                shared.opts.hypernetwork_obj_list.append(skip_y[counter])
-                counter += 1
-                continue
-            strength = hypernetwork_data[1]
-            hypernetwork_name = hypernetwork_data[0]
-            hypernetwork_obj = load_hypernetwork_custom(hypernetworks_list[hypernetwork_name])
+        for hypernetwork_ind in range(0, len(hypernetworks)):
+            #Skips loading hypernetworks that are already loaded
+            skipped = False
+            for i in skip:
+                if i[0] == hypernetwork_ind:
+                    strength = hypernetworks[hypernetwork_ind][1]
+                    hypernetwork_obj = i[1]
+                    skipped = True
+                    break
+            if not skipped: #if not skipped, load hypernetwork
+                hypernetwork_data = hypernetworks[hypernetwork_ind]
+                strength = hypernetwork_data[1]
+                hypernetwork_name = hypernetwork_data[0]
+                hypernetwork_obj = load_hypernetwork_custom(hypernetworks_list[hypernetwork_name])
 
             #This is an override for setting hypernetwork module strength: (we can't with the current functions)
             print("Setting layer strength to: ", strength)
@@ -342,7 +336,6 @@ class Script(scripts.Script):
                 for module in layer:
                     module.multiplier = strength
             shared.opts.hypernetwork_obj_list.append(hypernetwork_obj)
-            counter+=1
 
         #DEBUG:
         #print("Hypernetwork obj list:")
@@ -356,6 +349,7 @@ class Script(scripts.Script):
         #ldm.modules.diffusionmodules.model.AttnBlock.forward = sd_hijack_optimizations.xformers_attnblock_forward
         #We don't actually need to modify the AttnBlock method it seems, TODO Investigate this further
         #No hypernetworks get loaded, may need to write a custom function to optimize?
+        sd_hijack.fix_checkpoint() #NEW
 
         def flatten(el):
             flattened = [flatten(children) for children in el.children()]
