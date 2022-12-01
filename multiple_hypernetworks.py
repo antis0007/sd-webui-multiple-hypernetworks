@@ -245,7 +245,8 @@ class MultipleHypernetworks(scripts.Script):
         #personally I would redo how hypernets are loaded, but this is a quick fix
 
     def show(self, is_img2img):
-        return (not is_img2img)
+        #return (not is_img2img)
+        return(True) #show on all tabs
 
     def ui(self, is_img2img):
         global proc #global processing object, terrible solution
