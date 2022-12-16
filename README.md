@@ -3,6 +3,7 @@ Script that allows the use of multiple hypernetworks at once in AUTOMATIC1111's 
 
 ### UPDATES:
 - Now supports multiple optimization methods + higher resolutions!
+- Images generated with this script should have their hypernetwork metadata saved to the image
 - Fixed reloading weights for no reason
 - Added "reset" button:
   - **Press this once you finish using this script, otherwise hypernetworks will remain loaded**
@@ -20,12 +21,10 @@ This is a script I wrote to hack in the ability to apply multiple Hypernetworks 
 Hypernetworks are essentially small neural networks that can modify an image with a trained style, without taking away from your tokens / max prompt length like an embedding. They allow for fine tuning a model without touching any of its weights.
 
 ### How does this work?
-It overrides the hijack, optimization and CrossAttention forward functions in order to apply multiple hypernetworks sequentially, with different weights. The way that the WebUI is structured at the moment, I don't think this could be added as a main feature without some major changes.
+It overrides the hijack, optimization and CrossAttention forward functions in order to apply multiple hypernetworks sequentially, with different weights.
 
-Honestly I'm not sure that this works exactly like I think it does, but please try to contact me if you would like to help improve my code.
+Please contact me if you have any ideas to contribute or help improve this project.
 
-### Warning!
-Images generated with this script will **NOT** have the hypernetwork metadata saved to the image, meaning you must save the hypernetworks/strengths seperately if you want to reproduce exact images later.
 
 This script will not load hypernetworks globally into the opts/shared opts, since there is no reason to, and it just breaks a lot of the image saving.
 
