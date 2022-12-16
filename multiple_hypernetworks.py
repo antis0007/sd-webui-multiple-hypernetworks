@@ -4,9 +4,16 @@ import os
 
 from modules import devices, sd_hijack, sd_hijack_optimizations, sd_models, shared
 from modules import sd_hijack_clip, sd_hijack_open_clip #NEW
+from modules import processing, shared, sd_samplers, images, devices
+from modules.ui import plaintext_to_html
 
 from modules.shared import opts, cmd_opts, state, config_filename
 from modules.hypernetworks import hypernetwork
+
+from modules.processing import (StableDiffusionProcessing,
+                                StableDiffusionProcessingTxt2Img)
+
+from modules.processing import Processed
 
 import ldm.modules.attention
 import ldm.modules.diffusionmodules.model
@@ -20,6 +27,9 @@ from einops import repeat, rearrange
 import math
 import sys
 import traceback
+from collections import namedtuple
+
+Cached = namedtuple("Cached", ["noise", "cfg_scale", "steps", "latent", "original_prompt", "original_negative_prompt", "sigma_adjustment"])
 
 if shared.cmd_opts.xformers or shared.cmd_opts.force_enable_xformers:
     try:
@@ -231,7 +241,10 @@ def reset_script():
 def on_ui_settings():
 	section = ('multiple-hypernetworks', "Multiple Hypernetworks")
 
-class MultipleHypernetworks(scripts.Script):  
+class MultipleHypernetworks(scripts.Script):
+    def __init__(self) -> None:
+        super().__init__()
+    
     def title(self):
         #return "Hypernetworks EX V3"
         return "Multiple Hypernetworks"
@@ -244,8 +257,11 @@ class MultipleHypernetworks(scripts.Script):
 
         #personally I would redo how hypernets are loaded, but this is a quick fix
 
-    def show(self, is_img2img):
+    #def show(self, is_img2img):
         #return (not is_img2img)
+        #return(True) #show on all tabs
+    def show(self, is_img2img):
+        #return scripts.AlwaysVisible
         return(True) #show on all tabs
 
     def ui(self, is_img2img):
@@ -260,6 +276,26 @@ class MultipleHypernetworks(scripts.Script):
         btn = gr.Button(value="Reset")
         btn.click(reset_script)
         return [hypernetworks, hypernetworks_strength]
+    
+    """ def process(
+		self,
+		p: StableDiffusionProcessing,
+        **kwargs
+    ):
+        if isinstance(p, StableDiffusionProcessingTxt2Img):
+            global old_hypernetworks
+            temp_hypernetworks = []
+            temp_hypernetworks_strength = []
+            for i in range(len(old_hypernetworks)):
+                temp_hypernetworks.append(old_hypernetworks[i][0])
+                temp_hypernetworks_strength.append(old_hypernetworks[i][1])
+            self.hypernetwork = str(temp_hypernetworks)
+            self.hypernetwork_strength = str(temp_hypernetworks_strength) """
+    
+    #def process(self, p):
+        #global old_hypernetworks
+        #p.extra_generation_params["Multiple Hypernetworks"] = str(old_hypernetworks)
+
 
     def run(self, p, hypernetworks, hypernetworks_strength): #p = processing object
         global proc
@@ -366,3 +402,28 @@ class MultipleHypernetworks(scripts.Script):
             model.to(devices.device)
 
         old_hypernetworks = hypernetworks
+        #print("PROCESSING INFO:")
+        #print(proc.generation_params)
+        #print(proc.extra_generation_params)]
+        
+        #proc.extra_generation_params["Multiple Hypernetworks"] = str(hypernetworks).strip
+        
+        #GENERATING METADATA:
+        temp_hypernetworks = []
+        temp_hypernetworks_strength = []
+        for i in range(len(old_hypernetworks)):
+            temp_hypernetworks.append(str(old_hypernetworks[i][0]))
+            temp_hypernetworks_strength.append(str(old_hypernetworks[i][1]))
+        temp_hypernetworks = str(", ".join(temp_hypernetworks))
+        temp_hypernetworks_strength = str(", ".join(temp_hypernetworks_strength))
+        #print("TESTING:")
+        #print(temp_hypernetworks)
+        #print(temp_hypernetworks_strength)
+
+        #plaintext to html wont work here...
+        proc.extra_generation_params["Hypernetworks"] = temp_hypernetworks
+        proc.extra_generation_params["Hypernetworks Strengths"] = temp_hypernetworks_strength
+        processed = processing.process_images(proc)
+        return(processed)
+        #return(proc)
+
