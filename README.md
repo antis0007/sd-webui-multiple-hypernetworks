@@ -46,9 +46,9 @@ Example:
 
 > 0.4 , 0.8
 
-*List Requirements:*
-- *Must be the same length*
-- *Must not be empty*
+*Requirements for generating with Multiple Hypernetworks*
+- *The lists of hypernetworks and strengths provided must be the same length*
+- *Must provide at least one hypernetwork and one strength*
 
 Have Fun!
 
