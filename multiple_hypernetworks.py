@@ -8,7 +8,16 @@ from modules import processing, shared, sd_samplers, images, devices
 from modules.ui import plaintext_to_html
 
 from modules.shared import opts, cmd_opts, state, config_filename
-from modules.hypernetworks import hypernetwork
+
+import importlib
+try:
+    hypernetwork = importlib.import_module("extensions.Hypernetwork-MonkeyPatch-Extension.patches.hypernetwork")
+    print('Hypernetwork-MonkeyPatch-Extension found!')
+    monkeypatch_found = True
+except ImportError:
+    from modules.hypernetworks import hypernetwork
+    print('Hypernetwork-MonkeyPatch-Extension not found')
+    monkeypatch_found = False
 
 from modules.processing import (StableDiffusionProcessing,
                                 StableDiffusionProcessingTxt2Img)
@@ -65,8 +74,12 @@ def apply_multi_hypernetworks(hypernetwork_obj_list, context): #NO LAYER OPTION
             context_k = context_k
             context_v = context_v
             continue
-        context_k = hypernetwork_layers[0](context_k)
-        context_v = hypernetwork_layers[1](context_v)
+        if monkeypatch_found:
+            context_k = hypernetwork_layers[0](context_k, hypernetwork_layers[0].multiplier)
+            context_v = hypernetwork_layers[1](context_v, hypernetwork_layers[1].multiplier)
+        else:
+            context_k = hypernetwork_layers[0](context_k)
+            context_v = hypernetwork_layers[1](context_v)
     return context_k, context_v
 
 def apply_optimizations_custom():
