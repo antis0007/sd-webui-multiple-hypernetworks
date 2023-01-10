@@ -1,19 +1,38 @@
-# Multiple Hypernetworks
-Script that allows the use of multiple hypernetworks at once in AUTOMATIC1111's Stable Diffusion webui
+# Multiple Hypernetworks Extension
+Extension that allows the use of multiple hypernetworks at once in [AUTOMATIC1111's stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
 
-### UPDATES:
-- Now supports multiple optimization methods + higher resolutions!
-- Images generated with this script should have their hypernetwork metadata saved to the image
-- Fixed reloading weights for no reason
-- Added "reset" button:
-  - **Press this once you finish using this script, otherwise hypernetworks will remain loaded**
+### EXTENSION UPDATE:
+- Updated to an extension, now the Multiple Hypernetworks box will appear at the bottom of the UI without needing to select it as a script!
+- Old version of the script was archived to a seperate branch
+- Updated custom hijacks to be in line with the main auto1111 code
+- Fixed the need for the RESET button! It's still in this release as I'm worried about bugs related to porting from script to an extension, but now it will automatically remove applied hypernetworks when the hypernetworks list box is left blank!
+
 
 Please report any bugs you encounter with this version!
 
 
-## What is this?
+## Showcase / Usage:
+![image](https://user-images.githubusercontent.com/31860133/211479385-57a890cb-8b7d-41f7-9460-2c265378710e.png)
 
-This is a script I wrote to hack in the ability to apply multiple Hypernetworks at once in [AUTOMATIC1111's stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
+
+To use this extension, simply clone this repo into your extension directory inside stable-diffusion-webui
+> stable-diffusion-webui\extensions
+
+Once you do that, restart your webui and the Multiple Hypernetworks dropdown menu should appear!
+
+Open the "Hypernetworks List" tab with the arrow, and you'll see all the names of your hypernetworks, to use them all you need to do is copy the names into the "Hypernetworks" textbox as a **comma seperated list**.
+
+You will also need to provide an additional corresponding list of values for strength ranging from 0 to 1 in the "Hypernetwork strengths" textbox.
+
+Example:
+> anime_3(402c9025) ,  anime_2(813ae0d8) 
+
+> 0.4 , 0.8
+
+*The lists of hypernetworks and strengths provided must be the same length*
+
+Have Fun!
+
 
 ## Additional Info:
 
@@ -26,35 +45,9 @@ It overrides the hijack, optimization and CrossAttention forward functions in or
 Please contact me if you have any ideas to contribute or help improve this project.
 
 
-This script will not load hypernetworks globally into the opts/shared opts, since there is no reason to, and it just breaks a lot of the image saving.
 
-## Showcase / Usage:
-![image](https://user-images.githubusercontent.com/31860133/202029527-d4b2b853-cb22-473e-8e4f-ee01efb9166d.png)
-
-To use this script, simply drag the script into your scripts directory inside stable-diffusion-webui
-> stable-diffusion-webui\scripts
-
-Once you do that, restart your webui and select the script:
-> Multiple Hypernetworks
-
-Open the "Hypernetworks List" tab with the arrow, and you'll see all the names of your hypernetworks, to use them all you need to do is copy the names into the "Hypernetworks" textbox as a **comma seperated list**.
-
-You will also need to provide an additional corresponding list of values for strength ranging from 0 to 1 in the "Hypernetwork strengths" textbox.
-
-Example:
-> anime_3(402c9025) ,  anime_2(813ae0d8) 
-
-> 0.4 , 0.8
-
-*Requirements for generating with Multiple Hypernetworks*
-- *The lists of hypernetworks and strengths provided must be the same length*
-- *Must provide at least one hypernetwork and one strength*
-
-Have Fun!
 
 ---
 
 ### Disclaimer:
-I am absolutely not an expert on Stable Diffusion or even Machine Learning in general, just someone who's interested in hypernetworks and experimenting. I can't give any guarantee that this script will continue working with future changes, it ultimately hijacks and performs unintended operations through some custom functions and some existing ones.
-
-
+I am absolutely not an expert on Stable Diffusion or even Machine Learning in general, just someone who's interested in hypernetworks and experimenting. I can't give any guarantee that this extension will continue working with future versions of the webui.
