@@ -460,6 +460,7 @@ class MultipleHypernetworks(scripts.Script):
                 for layer in layers:
                     for module in layer:
                         module.multiplier = strength
+                hypernetwork_obj.multiplier = strength
                 shared.opts.hypernetwork_obj_list.append(hypernetwork_obj)
 
             sd_hijack.optimization_method = apply_optimizations_custom(sd_hijack)
